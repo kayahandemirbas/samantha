@@ -479,11 +479,22 @@ Güncel durum:
 ${JSON.stringify(context())}`;
 }
 
+const BRIDGE = /\.vercel\.app$/.test(location.hostname) ? "/api/chat" : "";
 async function think(userText){
   const history = turns.slice(-8);
   const msgs = [{role:"user",content:rules()},{role:"assistant",content:'{"cevap":"Hazırım.","islemler":[]}'},...history,{role:"user",content:userText}];
   if(sample){
     return await sample.json(msgs, {modelTier:"quick", cache:false});
+  }
+  if(BRIDGE){
+    let r;
+    try{
+      r = await fetch(BRIDGE,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({model:prefs.nvModel,messages:msgs})});
+    }catch(e){ throw {code:"bridge_down"}; }
+    if(!r.ok) throw {code:r.status===500?"bridge_key":"api_"+r.status};
+    const j=await r.json(); const txt=((j.choices||[])[0]||{}).message?.content||"";
+    const m=txt.match(/\{[\s\S]*\}/);
+    try{ return JSON.parse(m?m[0]:txt); }catch(e){ return {cevap:txt.replace(/[{}"]/g,"").trim(),islemler:[]}; }
   }
   if(prefs.nvKey){
     let r;
@@ -537,6 +548,8 @@ const errCopy = {
   rate_limited:"Biraz hızlı gittik. Birkaç saniye sonra tekrar sor.",
   no_brain:"Şu an düşünme bağlantım yok. Bu sayfayı Claude içinden aç ya da ayarlara API anahtarı ekle.",
   nv_blocked:"NVIDIA bu sayfadan gelen bağlantıyı kabul etmedi. Bunu Claude'a söyle, araya küçük bir köprü kuracak.",
+  bridge_down:"Köprüye ulaşamadım. İnternet bağlantını kontrol eder misin?",
+  bridge_key:"Köprü kuruldu ama NVIDIA anahtarı eklenmemiş. Vercel'de NVIDIA_API_KEY ayarını ekle.",
   nv_key:"NVIDIA anahtarı reddedildi. Ayarlardaki anahtarı kontrol et.",
   invalid_json:"Cümlemi toparlayamadım, bir kez daha sorar mısın?"
 };
@@ -585,7 +598,7 @@ $("clearMem").onclick=()=>{
   state={plan:[],notes:[],log:[]}; turns=[]; saveState(); render(); clearArmed=false; $("clearMem").textContent="Temizlendi";
 };
 function updateStatus(){
-  const brain = sample ? "<b>Düşünme:</b> Claude bağlı" : (prefs.nvKey ? "<b>Düşünme:</b> NVIDIA ile" : prefs.key ? "<b>Düşünme:</b> Anthropic anahtarı ile" : "<b>Düşünme:</b> bağlı değil");
+  const brain = sample ? "<b>Düşünme:</b> Claude bağlı" : BRIDGE ? "<b>Düşünme:</b> NVIDIA köprüsü (Vercel)" : (prefs.nvKey ? "<b>Düşünme:</b> NVIDIA ile" : prefs.key ? "<b>Düşünme:</b> Anthropic anahtarı ile" : "<b>Düşünme:</b> bağlı değil");
   const mem = db ? "<b>Hafıza:</b> hesabına kaydediliyor" : "<b>Hafıza:</b> bu cihazda";
   const mic = wakeRec ? "<b>Mikrofon:</b> “Hey Samantha” bekleniyor" : micWorks ? "<b>Mikrofon:</b> deneniyor" : "<b>Mikrofon:</b> bu ekranda kapalı, klavye diktesi kullan";
   $("connStatus").innerHTML = brain+"<br>"+mem+"<br>"+mic+"<br><b>Ses:</b> "+(voices.length? voices.length+" Türkçe ses bulundu" : "Türkçe ses bulunamadı");
