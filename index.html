@@ -53,7 +53,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 /* subtitles like the video */
 .subs{min-height:76px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;text-align:center;margin-bottom:6px}
 .subs .you{font-size:13px;color:var(--fg-faint);font-style:italic;min-height:18px}
-.subs .her{font-family:var(--display);font-weight:400;font-size:clamp(18px,5vw,22px);line-height:1.32;text-wrap:balance;max-height:4.1em;overflow:hidden}
+.subs .her{cursor:pointer;font-family:var(--display);font-weight:400;font-size:clamp(18px,5vw,22px);line-height:1.32;text-wrap:balance;max-height:4.1em;overflow:hidden}
 .subs .her .w{opacity:.18;transition:opacity .18s}
 .subs .her .w.on{opacity:1}
 
@@ -335,8 +335,8 @@ if(synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
 
 let unlocked=false;
 function unlockAudio(){
-  if(unlocked||!synth) return; unlocked=true;
-  try{ const u=new SpeechSynthesisUtterance(" "); u.volume=0; synth.speak(u); }catch(e){}
+  if(unlocked||!synth) return;
+  try{ const u=new SpeechSynthesisUtterance("."); u.volume=0.01; u.rate=2; u.lang="tr-TR"; u.onstart=()=>{ unlocked=true; }; synth.speak(u); }catch(e){}
 }
 
 function showWords(text){
@@ -353,10 +353,19 @@ function speak(text){
   return new Promise(resolve=>{
     const spans = showWords(text);
     const reveal = (ci)=>{ spans.forEach(s=>{ if(+s.dataset.start<=ci) s.classList.add("on"); }); };
-    const finish = ()=>{ clearInterval(fallback); spans.forEach(s=>s.classList.add("on")); setMode("idle"); resolve(); };
+    lastReply = text;
+    let done=false;
+    const finish = ()=>{ if(done) return; done=true; clearInterval(fallback); clearTimeout(noStart); spans.forEach(s=>s.classList.add("on")); setMode("idle"); resolve(); };
     setMode("speaking");
     if(!synth){ reveal(1e9); setTimeout(finish, 600); return; }
-    synth.cancel();
+    let gotStart=false;
+    const noStart = setTimeout(()=>{            // engine never started: phone muted or audio not unlocked
+      if(gotStart) return;
+      silentHint=true;
+      setTimeout(()=>{ finish(); $("hint").textContent="Ses gelmedi mi? Sessiz modu kapat, sesi aç ve yazıya dokun"; }, Math.max(0, est-2500));
+    }, 2500);
+    if(synth.speaking||synth.pending) synth.cancel();
+    try{ synth.resume(); }catch(e){}
     const u=new SpeechSynthesisUtterance(text);
     u.lang="tr-TR"; u.rate=prefs.rate; u.pitch=prefs.pitch;
     const v=voices.find(v=>v.name===prefs.voice)||voices[0]; if(v) u.voice=v;
@@ -365,14 +374,14 @@ function speak(text){
     const fallback = setInterval(()=>{                       // keeps orb + subtitles moving even if the engine sends no word events
       if(!gotBoundary){ reveal(text.length*Math.min(1,(Date.now()-started)/est)); level=Math.max(level,.45+Math.random()*.4); }
     },140);
-    u.onstart=()=>{ started=Date.now(); };
+    u.onstart=()=>{ gotStart=true; silentHint=false; started=Date.now(); };
     u.onboundary=(e)=>{ gotBoundary=true; reveal(e.charIndex); level=.75+Math.random()*.25; };
     u.onend=finish; u.onerror=finish;
     currentDone = finish;
-    synth.speak(u);
+    setTimeout(()=>{ try{ synth.speak(u); }catch(e){ finish(); } }, 60);   // iOS drops a speak() issued right after cancel()
   });
 }
-let currentDone=null;
+let currentDone=null, lastReply="", silentHint=false;
 function hush(){ try{ synth&&synth.cancel(); }catch(e){} if(currentDone){ currentDone(); currentDone=null; } stopListening(); }
 
 /* ---------------- mode / labels ---------------- */
@@ -558,6 +567,7 @@ $("micBtn").onclick=()=>{ unlockAudio(); stopped=false;if(mode==="speaking"){ hu
 $("kbBtn").onclick=()=>{ unlockAudio(); const tb=$("typebar"); if(tb.hidden) openTyping(false); else tb.hidden=true; };
 $("stopBtn").onclick=()=>{ stopped=true; hush(); setMode("idle"); };
 $("typebar").addEventListener("submit",(e)=>{ e.preventDefault(); const v=$("typeIn").value; $("typeIn").value=""; $("typeIn").blur(); ask(v); });
+$("herLine").addEventListener("click",()=>{ if(lastReply && mode!=="speaking"){ unlocked=false; unlockAudio(); speak(lastReply); } });
 $("chips").addEventListener("click",(e)=>{ const b=e.target.closest(".chip"); if(b) ask(b.textContent); });
 
 $("openSettings").onclick=()=>{ $("sheet").hidden=false; $("nameIn").value=prefs.name; $("aboutIn").value=prefs.about; $("rateIn").value=prefs.rate; $("pitchIn").value=prefs.pitch; $("keyIn").value=prefs.key; $("nvKeyIn").value=prefs.nvKey; $("nvModelIn").value=prefs.nvModel; $("hfIn").value=prefs.handsFree?"1":"0"; $("wakeIn").value=prefs.wake?"1":"0"; loadVoices(); updateStatus(); };
